@@ -1,6 +1,6 @@
 import express, { type Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { dbStorage as storage } from "./db-storage";
 import { scraper } from "./scraper";
 import { z } from "zod";
 import { convertLeadsToCSV, validateEmail } from "./utils";

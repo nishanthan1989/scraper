@@ -1,5 +1,5 @@
 import type { InsertLead, ScrapingSource } from '@shared/schema';
-import { storage } from './storage';
+import { dbStorage as storage } from './db-storage';
 
 // Interface for scraped data
 export interface ScrapedData {
