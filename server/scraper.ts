@@ -23,17 +23,17 @@ export interface ScrapedData {
 // Scraper implementation for real websites
 export class Scraper {
   async scrapeSource(source: ScrapingSource): Promise<number> {
+    // Create a new scraping job record
+    const job = await storage.createScrapingJob({
+      sourceId: source.id,
+      status: 'running',
+      startTime: new Date(),
+      leadsFound: 0,
+      leadsAdded: 0,
+      error: null
+    });
+    
     try {
-      // Create a new scraping job record
-      const job = await storage.createScrapingJob({
-        sourceId: source.id,
-        status: 'running',
-        startTime: new Date(),
-        leadsFound: 0,
-        leadsAdded: 0,
-        error: null
-      });
-      
       console.log(`Starting scrape for source: ${source.name}`);
       
       let scrapedLeads: ScrapedData[] = [];
@@ -42,9 +42,8 @@ export class Scraper {
         // Use specialized scraping for Commercial Real Estate Australia
         scrapedLeads = await this.scrapeCommercialRealEstate(source.url);
       } else {
-        // Fallback to demo data if the site is not supported
-        console.log("Source not specifically supported, generating demo data instead");
-        scrapedLeads = this.generateDemoLeads(source);
+        // For other sources, use the CSS selectors provided in the source config
+        scrapedLeads = await this.scrapeGenericWebsite(source);
       }
       
       // Save the generated leads
@@ -82,7 +81,81 @@ export class Scraper {
       return savedCount;
     } catch (error) {
       console.error('Scraping error:', error);
+      
+      // Update job with error
+      try {
+        if (error instanceof Error) {
+          await storage.updateScrapingJob(job.id, {
+            status: 'failed',
+            endTime: new Date(),
+            error: error.message
+          });
+        }
+      } catch (updateError) {
+        console.error('Failed to update job status:', updateError);
+      }
+      
       return 0;
+    }
+  }
+  
+  // Generic scraper using source selectors
+  private async scrapeGenericWebsite(source: ScrapingSource): Promise<ScrapedData[]> {
+    try {
+      const response = await fetch(source.url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch page: ${response.status}`);
+      }
+      
+      const html = await response.text();
+      const $ = cheerio.load(html);
+      const leads: ScrapedData[] = [];
+      
+      // Get selectors from source config
+      const selectors = source.selectors as any;
+      if (!selectors || !selectors.leadContainer) {
+        throw new Error('Invalid selectors configuration');
+      }
+      
+      // Find lead containers
+      $(selectors.leadContainer).each((i, element) => {
+        try {
+          // Extract data using the provided selectors
+          const companyName = $(element).find(selectors.companyName).text().trim();
+          
+          // Skip if no company name found
+          if (!companyName) {
+            return;
+          }
+          
+          const lead: ScrapedData = {
+            companyName: companyName,
+            industry: selectors.industry ? $(element).find(selectors.industry).text().trim() : undefined,
+            address: selectors.address ? $(element).find(selectors.address).text().trim() : undefined,
+            city: selectors.city ? $(element).find(selectors.city).text().trim() : undefined,
+            state: selectors.state ? $(element).find(selectors.state).text().trim() : undefined,
+            zipCode: selectors.zipCode ? $(element).find(selectors.zipCode).text().trim() : undefined,
+            contactName: selectors.contactName ? $(element).find(selectors.contactName).text().trim() : undefined,
+            contactEmail: selectors.contactEmail ? $(element).find(selectors.contactEmail).text().trim() : undefined,
+            contactPhone: selectors.contactPhone ? $(element).find(selectors.contactPhone).text().trim() : undefined,
+            moveDate: selectors.moveDate ? new Date($(element).find(selectors.moveDate).text().trim()) : new Date(),
+            website: selectors.website ? $(element).find(selectors.website).text().trim() : undefined,
+          };
+          
+          leads.push(lead);
+        } catch (error) {
+          console.error('Error processing listing:', error);
+        }
+      });
+      
+      if (leads.length === 0) {
+        throw new Error('No leads found on the page');
+      }
+      
+      return leads;
+    } catch (error) {
+      console.error('Error scraping website:', error);
+      throw error;
     }
   }
   
@@ -99,27 +172,73 @@ export class Scraper {
       const $ = cheerio.load(html);
       const leads: ScrapedData[] = [];
       
-      // Find property listings
-      $('.property-card').each((i, element) => {
+      // Debug log the HTML structure to help with debugging
+      console.log('Analyzing page structure...');
+      
+      // Find property listings - trying different selectors
+      const selectors = [
+        '.property-card',
+        '.property-list',
+        '.property-listing',
+        '.property-result',
+        '.property',
+        '.listing-card',
+        'article',
+        '.card'
+      ];
+      
+      let propertyElements: cheerio.Cheerio<cheerio.Element> = null;
+      for (const selector of selectors) {
+        const elements = $(selector);
+        if (elements.length > 0) {
+          console.log(`Found ${elements.length} elements with selector: ${selector}`);
+          propertyElements = elements;
+          break;
+        }
+      }
+      
+      if (!propertyElements || propertyElements.length === 0) {
+        throw new Error('No property listings found on the page');
+      }
+      
+      // Process each property listing
+      propertyElements.each((i: number, element: cheerio.Element) => {
         try {
-          // Basic property details
-          const address = $(element).find('.address-line').text().trim();
-          const suburb = $(element).find('.address-suburb').text().trim();
-          const state = $(element).find('.address-state').text().trim();
-          const postcode = $(element).find('.address-postcode').text().trim();
+          // Try to extract using various possible selector combinations
+          const title = $(element).find('h2, h3, .title, .heading').first().text().trim();
+          const address = $(element).find('.address, .location, .property-address').first().text().trim();
           
-          // Agent/company details
-          const agentName = $(element).find('.agent-name').text().trim();
-          const agencyName = $(element).find('.agency-name').text().trim();
-          const phone = $(element).find('.contact-number').text().trim();
+          // Split address into components if possible
+          let suburb = '';
+          let state = '';
+          let postcode = '';
+          
+          const addressParts = address.split(',');
+          if (addressParts.length > 1) {
+            suburb = addressParts[addressParts.length - 2]?.trim() || '';
+            
+            // Try to extract state and postcode from the last part
+            const lastPart = addressParts[addressParts.length - 1]?.trim() || '';
+            const statePostcodeMatch = lastPart.match(/([A-Z]{2,3})\s+(\d{4})/);
+            if (statePostcodeMatch) {
+              state = statePostcodeMatch[1];
+              postcode = statePostcodeMatch[2];
+            }
+          }
+          
+          // Try to find agent details
+          const agentName = $(element).find('.agent-name, .agent, .contact-name').first().text().trim();
+          const agencyName = $(element).find('.agency-name, .agency, .company-name').first().text().trim();
+          const phone = $(element).find('.phone, .tel, .contact-number').first().text().trim();
           
           // Property details
-          const propertyType = $(element).find('.property-info-value:contains("Type")').next().text().trim();
+          const propertyType = $(element).find('.property-type, .type, .category').first().text().trim();
+          const propertySize = $(element).find('.property-size, .size, .area').first().text().trim();
           
-          // Extract a company name from the available info
-          const companyName = agencyName || `${propertyType} Property in ${suburb}`;
+          // Determine company name from available data
+          const companyName = agencyName || title || `Property in ${suburb || 'Australia'}`;
           
-          // Create a lead entry
+          // Create a lead entry with the extracted data
           leads.push({
             companyName: companyName,
             industry: 'Real Estate',
@@ -129,88 +248,27 @@ export class Scraper {
             zipCode: postcode,
             contactName: agentName || 'Property Manager',
             contactTitle: 'Leasing Agent',
-            contactEmail: null,
-            contactPhone: phone || null,
+            contactEmail: undefined, // Email usually requires deeper scraping of individual listings
+            contactPhone: phone || undefined,
             moveDate: new Date(), // Most recent listed date
-            website: null,
-            employeeCount: null,
-            officeSize: propertyType || null
+            website: undefined,
+            employeeCount: undefined,
+            officeSize: propertySize || propertyType || undefined
           });
         } catch (error) {
           console.error('Error processing property listing:', error);
         }
       });
       
-      // If we couldn't find any leads, generate some demo data
       if (leads.length === 0) {
-        console.log("No leads found on the page, generating demo data");
-        return this.generateDemoLeads({ name: "Commercial Real Estate Australia", url: baseUrl } as ScrapingSource);
+        throw new Error('No lead data could be extracted from the page');
       }
       
       return leads;
     } catch (error) {
       console.error('Error scraping Commercial Real Estate:', error);
-      // Fallback to demo data in case of error
-      return this.generateDemoLeads({ name: "Commercial Real Estate Australia", url: baseUrl } as ScrapingSource);
+      throw error;
     }
-  }
-  
-  // Generate demo leads with realistic Australian data
-  private generateDemoLeads(source: ScrapingSource): ScrapedData[] {
-    const companyNames = [
-      'Westfield Properties', 'Australia Pacific Holdings', 'Melbourne Business Solutions', 
-      'Sydney Commercial Services', 'Brisbane Corporate Spaces', 'Perth Business Centers',
-      'Adelaide Office Solutions', 'Canberra Professional Suites', 'Gold Coast Workspaces',
-      'Newcastle Business Hub', 'Central Systems Australia', 'National Corporate Offices'
-    ];
-    
-    const industries = [
-      'Real Estate', 'Financial Services', 'Healthcare', 'Legal Services',
-      'Retail', 'Marketing', 'Education', 'Consulting',
-      'Mining', 'Technology', 'Media', 'Transportation'
-    ];
-    
-    const cities = [
-      'Sydney', 'Melbourne', 'Brisbane', 'Perth',
-      'Adelaide', 'Canberra', 'Gold Coast', 'Newcastle', 
-      'Hobart', 'Darwin', 'Wollongong', 'Sunshine Coast'
-    ];
-    
-    const states = [
-      'NSW', 'VIC', 'QLD', 'WA', 
-      'SA', 'ACT', 'QLD', 'NSW',
-      'TAS', 'NT', 'NSW', 'QLD'
-    ];
-    
-    const leads: ScrapedData[] = [];
-    
-    // Generate between 5-15 random leads
-    const count = Math.floor(Math.random() * 10) + 5;
-    
-    for (let i = 0; i < count; i++) {
-      const randomIndex = Math.floor(Math.random() * companyNames.length);
-      const moveDate = new Date();
-      moveDate.setDate(moveDate.getDate() - Math.floor(Math.random() * 30));
-      
-      leads.push({
-        companyName: companyNames[randomIndex],
-        industry: industries[randomIndex],
-        address: `${Math.floor(Math.random() * 999) + 1} ${['Collins St', 'George St', 'Queen St', 'King William St'][randomIndex % 4]}`,
-        city: cities[randomIndex],
-        state: states[randomIndex],
-        zipCode: `${Math.floor(Math.random() * 9000) + 1000}`,
-        contactName: `${['John', 'Sarah', 'Michael', 'Emma', 'David', 'Olivia'][Math.floor(Math.random() * 6)]} ${['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Miller'][Math.floor(Math.random() * 6)]}`,
-        contactTitle: 'Office Manager',
-        contactEmail: `contact@${companyNames[randomIndex].toLowerCase().replace(/[^a-z0-9]/g, '')}.com.au`,
-        contactPhone: `(0${Math.floor(Math.random() * 9) + 1}) ${Math.floor(Math.random() * 9000) + 1000} ${Math.floor(Math.random() * 9000) + 1000}`,
-        website: `https://www.${companyNames[randomIndex].toLowerCase().replace(/[^a-z0-9]/g, '')}.com.au`,
-        moveDate,
-        employeeCount: Math.floor(Math.random() * 500) + 10,
-        officeSize: `${Math.floor(Math.random() * 10000) + 1000} sqm`
-      });
-    }
-    
-    return leads;
   }
 }
 
