@@ -1,6 +1,8 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { closeDbConnection } from "./db";
+import { promises as fs } from "fs";
 
 const app = express();
 app.use(express.json());
@@ -37,6 +39,13 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Create drizzle directory if it doesn't exist
+  try {
+    await fs.mkdir('drizzle', { recursive: true });
+  } catch (error) {
+    console.error('Error creating drizzle directory:', error);
+  }
+
   const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -67,4 +76,15 @@ app.use((req, res, next) => {
   }, () => {
     log(`serving on port ${port}`);
   });
+  
+  // Handle graceful shutdown to close DB connections
+  const shutdown = async () => {
+    log('Shutting down server...');
+    server.close();
+    await closeDbConnection();
+    process.exit(0);
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 })();
