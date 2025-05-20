@@ -221,6 +221,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get active scraping jobs with progress information
+  router.get("/scraping-jobs/active", async (req: Request, res: Response) => {
+    try {
+      const activeJobs = scraper.getActiveJobs();
+      res.json(activeJobs);
+    } catch (error) {
+      console.error("Error fetching active scraping jobs:", error);
+      res.status(500).json({ message: "Failed to fetch active scraping jobs" });
+    }
+  });
+
+  // Pause a running scraping job
+  router.post("/scraping-jobs/:jobId/pause", async (req: Request, res: Response) => {
+    try {
+      const jobId = parseInt(req.params.jobId, 10);
+      
+      if (isNaN(jobId)) {
+        return res.status(400).json({ message: "Invalid job ID" });
+      }
+      
+      const isPaused = await scraper.pauseScrapingJob(jobId);
+      
+      if (isPaused) {
+        res.json({ message: "Scraping job paused", jobId });
+      } else {
+        res.status(404).json({ message: "Job not found or not in a pausable state" });
+      }
+    } catch (error) {
+      console.error("Error pausing scraping job:", error);
+      res.status(500).json({ message: "Failed to pause scraping job" });
+    }
+  });
+
+  // Resume a paused scraping job
+  router.post("/scraping-jobs/:jobId/resume", async (req: Request, res: Response) => {
+    try {
+      const jobId = parseInt(req.params.jobId, 10);
+      
+      if (isNaN(jobId)) {
+        return res.status(400).json({ message: "Invalid job ID" });
+      }
+      
+      const isResumed = await scraper.resumeScrapingJob(jobId);
+      
+      if (isResumed) {
+        res.json({ message: "Scraping job resumed", jobId });
+      } else {
+        res.status(404).json({ message: "Job not found or not in a resumable state" });
+      }
+    } catch (error) {
+      console.error("Error resuming scraping job:", error);
+      res.status(500).json({ message: "Failed to resume scraping job" });
+    }
+  });
+
+  // Cancel a running or paused scraping job
+  router.post("/scraping-jobs/:jobId/cancel", async (req: Request, res: Response) => {
+    try {
+      const jobId = parseInt(req.params.jobId, 10);
+      
+      if (isNaN(jobId)) {
+        return res.status(400).json({ message: "Invalid job ID" });
+      }
+      
+      const isCancelled = await scraper.cancelScrapingJob(jobId);
+      
+      if (isCancelled) {
+        res.json({ message: "Scraping job cancelled", jobId });
+      } else {
+        res.status(404).json({ message: "Job not found" });
+      }
+    } catch (error) {
+      console.error("Error cancelling scraping job:", error);
+      res.status(500).json({ message: "Failed to cancel scraping job" });
+    }
+  });
+
   // Start scraping job
   router.post("/scrape/:sourceId", async (req: Request, res: Response) => {
     try {
@@ -229,6 +306,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (!source) {
         return res.status(404).json({ message: "Scraping source not found" });
+      }
+      
+      // Check if a job is already running for this source
+      if (scraper.isScrapingRunning(sourceId)) {
+        return res.status(409).json({ 
+          message: "A scraping job is already running for this source",
+          sourceId 
+        });
       }
       
       // Start scraping in the background
