@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
+import { Progress } from "@/components/ui/progress";
 import {
   Select,
   SelectContent,
@@ -25,7 +26,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { TableProperties, Globe, Play, Clock, Settings, AlertCircle, CheckCircle } from "lucide-react";
+import { 
+  TableProperties, Globe, Play, Clock, Settings, AlertCircle, CheckCircle, 
+  Pause, PlayCircle, XCircle, AlertTriangle
+} from "lucide-react";
 import type { ScrapingSource, ScrapingJob } from "@shared/schema";
 
 export default function WebScraping() {
@@ -96,6 +100,12 @@ export default function WebScraping() {
   // Fetch scraping jobs
   const { data: jobs, isLoading: jobsLoading } = useQuery({
     queryKey: ["/api/scraping-jobs"],
+  });
+  
+  // Fetch active scraping jobs with progress information
+  const { data: activeJobs, isLoading: activeJobsLoading } = useQuery({
+    queryKey: ["/api/scraping-jobs/active"],
+    refetchInterval: 2000, // Poll every 2 seconds to update progress
   });
 
   // Add new scraping source
@@ -170,6 +180,7 @@ export default function WebScraping() {
     },
     onSuccess: (_, sourceId) => {
       queryClient.invalidateQueries({ queryKey: ["/api/scraping-jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/scraping-jobs/active"] });
       toast({
         title: "Scraping Started",
         description: `Scraping job for source #${sourceId} started successfully`,
@@ -184,6 +195,99 @@ export default function WebScraping() {
       });
     },
   });
+  
+  // Pause scraping job
+  const pauseScrapingMutation = useMutation({
+    mutationFn: async (jobId: number) => {
+      const response = await fetch(`/api/scraping-jobs/${jobId}/pause`, {
+        method: "POST",
+      });
+      
+      if (!response.ok) {
+        throw new Error("Failed to pause scraping job");
+      }
+      
+      return response.json();
+    },
+    onSuccess: (_, jobId) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/scraping-jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/scraping-jobs/active"] });
+      toast({
+        title: "Job Paused",
+        description: `Scraping job #${jobId} has been paused`,
+        variant: "default",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: `Failed to pause job: ${error.message}`,
+        variant: "destructive",
+      });
+    },
+  });
+  
+  // Resume scraping job
+  const resumeScrapingMutation = useMutation({
+    mutationFn: async (jobId: number) => {
+      const response = await fetch(`/api/scraping-jobs/${jobId}/resume`, {
+        method: "POST",
+      });
+      
+      if (!response.ok) {
+        throw new Error("Failed to resume scraping job");
+      }
+      
+      return response.json();
+    },
+    onSuccess: (_, jobId) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/scraping-jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/scraping-jobs/active"] });
+      toast({
+        title: "Job Resumed",
+        description: `Scraping job #${jobId} has been resumed`,
+        variant: "default",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: `Failed to resume job: ${error.message}`,
+        variant: "destructive",
+      });
+    },
+  });
+  
+  // Cancel scraping job
+  const cancelScrapingMutation = useMutation({
+    mutationFn: async (jobId: number) => {
+      const response = await fetch(`/api/scraping-jobs/${jobId}/cancel`, {
+        method: "POST",
+      });
+      
+      if (!response.ok) {
+        throw new Error("Failed to cancel scraping job");
+      }
+      
+      return response.json();
+    },
+    onSuccess: (_, jobId) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/scraping-jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/scraping-jobs/active"] });
+      toast({
+        title: "Job Cancelled",
+        description: `Scraping job #${jobId} has been cancelled`,
+        variant: "default",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: `Failed to cancel job: ${error.message}`,
+        variant: "destructive",
+      });
+    },
+  });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -192,6 +296,18 @@ export default function WebScraping() {
 
   const startScraping = (sourceId: number) => {
     startScrapingMutation.mutate(sourceId);
+  };
+  
+  const pauseScrapingJob = (jobId: number) => {
+    pauseScrapingMutation.mutate(jobId);
+  };
+  
+  const resumeScrapingJob = (jobId: number) => {
+    resumeScrapingMutation.mutate(jobId);
+  };
+  
+  const cancelScrapingJob = (jobId: number) => {
+    cancelScrapingMutation.mutate(jobId);
   };
 
   return (
@@ -302,83 +418,181 @@ export default function WebScraping() {
 
           {/* Scraping Jobs tab */}
           <TabsContent value="jobs">
-            <div className="space-y-4">
-              {jobsLoading ? (
-                <p>Loading jobs...</p>
-              ) : !jobs || jobs.length === 0 ? (
-                <Alert>
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertTitle>No Jobs Found</AlertTitle>
-                  <AlertDescription>
-                    No scraping jobs have been run yet. Start a scraping job from the Scraping Sources tab.
-                  </AlertDescription>
-                </Alert>
-              ) : (
-                jobs.map((job: ScrapingJob) => {
-                  const source = sources?.find((s: ScrapingSource) => s.id === job.sourceId);
-                  return (
-                    <Card key={job.id}>
-                      <CardHeader>
-                        <CardTitle className="flex items-center justify-between">
-                          <span>
-                            Job #{job.id} - {source?.name || `Source #${job.sourceId}`}
-                          </span>
-                          <div>
-                            {job.status === "completed" && (
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                <CheckCircle className="h-3 w-3 mr-1" />
-                                Completed
+            <div className="space-y-6">
+              {/* Active Jobs Section */}
+              <div>
+                <h3 className="text-lg font-medium mb-3">Active Scraping Jobs</h3>
+                {activeJobsLoading ? (
+                  <p>Loading active jobs...</p>
+                ) : !activeJobs || activeJobs.length === 0 ? (
+                  <Alert className="mb-6">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>No Active Jobs</AlertTitle>
+                    <AlertDescription>
+                      There are no scraping jobs currently running. Start a new job from the Scraping Sources tab.
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  <div className="space-y-4 mb-6">
+                    {activeJobs.map((activeJob: any) => {
+                      const source = sources?.find((s: ScrapingSource) => s.id === activeJob.sourceId);
+                      return (
+                        <Card key={activeJob.jobId} className="border-blue-200">
+                          <CardHeader className="pb-2">
+                            <CardTitle className="flex items-center justify-between">
+                              <span>
+                                Job #{activeJob.jobId} - {source?.name || `Source #${activeJob.sourceId}`}
                               </span>
+                              <div>
+                                {activeJob.status === "running" && (
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                    <Clock className="h-3 w-3 mr-1 animate-spin" />
+                                    Running
+                                  </span>
+                                )}
+                                {activeJob.status === "paused" && (
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                                    <Pause className="h-3 w-3 mr-1" />
+                                    Paused
+                                  </span>
+                                )}
+                              </div>
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="mb-4">
+                              <div className="flex justify-between mb-1 text-sm">
+                                <span>Progress</span>
+                                <span>{activeJob.progress}%</span>
+                              </div>
+                              <Progress value={activeJob.progress} className="h-2" />
+                            </div>
+                            
+                            <div className="flex justify-end space-x-2">
+                              {activeJob.status === "running" && (
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => pauseScrapingJob(activeJob.jobId)}
+                                  disabled={pauseScrapingMutation.isPending}
+                                >
+                                  <Pause className="h-4 w-4 mr-1" />
+                                  Pause
+                                </Button>
+                              )}
+                              {activeJob.status === "paused" && (
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => resumeScrapingJob(activeJob.jobId)}
+                                  disabled={resumeScrapingMutation.isPending}
+                                >
+                                  <PlayCircle className="h-4 w-4 mr-1" />
+                                  Resume
+                                </Button>
+                              )}
+                              <Button 
+                                size="sm" 
+                                variant="destructive"
+                                onClick={() => cancelScrapingJob(activeJob.jobId)}
+                                disabled={cancelScrapingMutation.isPending}
+                              >
+                                <XCircle className="h-4 w-4 mr-1" />
+                                Cancel
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              
+              {/* Job History Section */}
+              <div>
+                <h3 className="text-lg font-medium mb-3">Job History</h3>
+                {jobsLoading ? (
+                  <p>Loading job history...</p>
+                ) : !jobs || jobs.length === 0 ? (
+                  <Alert>
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>No Job History</AlertTitle>
+                    <AlertDescription>
+                      No scraping jobs have been run yet. Start a scraping job from the Scraping Sources tab.
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  jobs.map((job: ScrapingJob) => {
+                    const source = sources?.find((s: ScrapingSource) => s.id === job.sourceId);
+                    // Skip jobs that are currently active (they're shown in the active section)
+                    if (activeJobs?.some((aj: any) => aj.jobId === job.id)) {
+                      return null;
+                    }
+                    return (
+                      <Card key={job.id} className={job.status === "completed" ? "border-green-200" : job.status === "failed" ? "border-red-200" : ""}>
+                        <CardHeader>
+                          <CardTitle className="flex items-center justify-between">
+                            <span>
+                              Job #{job.id} - {source?.name || `Source #${job.sourceId}`}
+                            </span>
+                            <div>
+                              {job.status === "completed" && (
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                  <CheckCircle className="h-3 w-3 mr-1" />
+                                  Completed
+                                </span>
+                              )}
+                              {job.status === "failed" && (
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                  <AlertTriangle className="h-3 w-3 mr-1" />
+                                  Failed
+                                </span>
+                              )}
+                              {job.status === "cancelled" && (
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                  <XCircle className="h-3 w-3 mr-1" />
+                                  Cancelled
+                                </span>
+                              )}
+                            </div>
+                          </CardTitle>
+                          <CardDescription>
+                            Started: {formatDateTime(job.startTime)}
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-2 text-sm">
+                            {job.endTime && (
+                              <div>
+                                <span className="font-medium">Completed:</span>{" "}
+                                {formatDateTime(job.endTime)}
+                              </div>
                             )}
-                            {job.status === "running" && (
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                <Clock className="h-3 w-3 mr-1 animate-spin" />
-                                Running
-                              </span>
+                            {job.leadsFound !== undefined && (
+                              <div>
+                                <span className="font-medium">Leads found:</span>{" "}
+                                {job.leadsFound}
+                              </div>
                             )}
-                            {job.status === "failed" && (
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                <AlertCircle className="h-3 w-3 mr-1" />
-                                Failed
-                              </span>
+                            {job.leadsAdded !== undefined && (
+                              <div>
+                                <span className="font-medium">Leads added:</span>{" "}
+                                {job.leadsAdded}
+                              </div>
+                            )}
+                            {job.error && (
+                              <div className="text-red-600">
+                                <span className="font-medium">Error:</span> {job.error}
+                              </div>
                             )}
                           </div>
-                        </CardTitle>
-                        <CardDescription>
-                          Started: {formatDateTime(job.startTime)}
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="space-y-2 text-sm">
-                          {job.endTime && (
-                            <div>
-                              <span className="font-medium">Completed:</span>{" "}
-                              {formatDateTime(job.endTime)}
-                            </div>
-                          )}
-                          {job.leadsFound !== undefined && (
-                            <div>
-                              <span className="font-medium">Leads found:</span>{" "}
-                              {job.leadsFound}
-                            </div>
-                          )}
-                          {job.leadsAdded !== undefined && (
-                            <div>
-                              <span className="font-medium">Leads added:</span>{" "}
-                              {job.leadsAdded}
-                            </div>
-                          )}
-                          {job.error && (
-                            <div className="text-red-600">
-                              <span className="font-medium">Error:</span> {job.error}
-                            </div>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })
-              )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })
+                )}
+              </div>
             </div>
           </TabsContent>
 
