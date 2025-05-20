@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { formatDateTime, getInitials } from "@/lib/utils";
+import { formatDate, formatDateTime, getInitials } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { 
   MapPin, 
