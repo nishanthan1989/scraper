@@ -53,6 +53,40 @@ export default function WebScraping() {
     },
     enabled: true,
   });
+  
+  // Predefined templates for common websites
+  const templates = {
+    commercialRealEstate: {
+      name: "Commercial Real Estate Australia",
+      url: "https://www.commercialrealestate.com.au/leased/vic/",
+      selectors: {
+        leadContainer: ".search-results__results .cards-wrapper > div",
+        companyName: ".agent__details .agent__name",
+        industry: "Real Estate",
+        address: ".address-line",
+        city: ".address-suburb",
+        state: ".address-state",
+        contactName: ".agent__details .agent__name",
+        contactEmail: ".agent__contact-details .agent__email",
+        contactPhone: ".agent__contact-details .agent__phone",
+        moveDate: ".listing-details .listing-details__update-date",
+      },
+      requiresAuthentication: false,
+      enabled: true,
+    }
+  };
+  
+  // Function to apply a template
+  const applyTemplate = (templateName: keyof typeof templates) => {
+    if (templates[templateName]) {
+      setNewSource({...templates[templateName]});
+      toast({
+        title: "Template Applied",
+        description: `Applied the ${templates[templateName].name} template. You can customize it further before adding.`,
+        variant: "default",
+      });
+    }
+  };
 
   // Fetch scraping sources
   const { data: sources, isLoading: sourcesLoading } = useQuery({
@@ -358,6 +392,21 @@ export default function WebScraping() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
+                <div className="mb-6 p-4 bg-blue-50 rounded-md">
+                  <h3 className="text-md font-medium mb-2">Quick Start Templates</h3>
+                  <p className="text-sm text-gray-600 mb-3">
+                    Use these pre-configured templates to get started quickly:
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => applyTemplate('commercialRealEstate')}
+                      type="button"
+                    >
+                      Commercial Real Estate Australia
+                    </Button>
+                  </div>
+                </div>
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
